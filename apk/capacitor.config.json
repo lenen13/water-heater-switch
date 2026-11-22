@@ -1,0 +1,10 @@
+{
+  "appId": "com.wsp.heater",
+  "appName": "热水器开关",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#f5f7fa"
+  }
+}

@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>热水器开关 · WSP</title>
+<style>
+  :root{
+    --bg:#0b1220; --card:#151d2e; --card2:#1b2537; --line:#26314a;
+    --fg:#e8eefc; --dim:#8b9ac0; --accent:#4f8cff; --ok:#2ecc71; --warn:#ffb020; --err:#ff5c5c;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  body{padding:16px 14px 40px;max-width:520px;margin:0 auto}
+  h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.5px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+  .dev{font-size:12px;color:var(--dim)}
+  .dev b{color:var(--fg);font-weight:600}
+  .btn{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;transition:.15s}
+  .btn:active{transform:scale(.97)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+
+  /* 大圆钮 */
+  .dial{position:relative;width:230px;height:230px;margin:6px auto 4px;display:flex;align-items:center;justify-content:center}
+  .dial svg{position:absolute;inset:0;transform:rotate(-90deg)}
+  .ring-bg{fill:none;stroke:#1e2942;stroke-width:12}
+  .ring-fg{fill:none;stroke:var(--accent);stroke-width:12;stroke-linecap:round;transition:stroke-dashoffset .4s linear,stroke .3s}
+  .knob{width:186px;height:186px;border-radius:50%;background:radial-gradient(circle at 50% 30%,#22304c,#141c2c);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:.2s;user-select:none}
+  .knob.on{background:radial-gradient(circle at 50% 30%,#1d4b34,#12301f);border-color:#2f6b4a;box-shadow:0 0 40px rgba(46,204,113,.25)}
+  .knob.fault{background:radial-gradient(circle at 50% 30%,#4b1d1d,#301212);border-color:#6b2f2f}
+  .knob:active{transform:scale(.98)}
+  .knob .t1{font-size:15px;color:var(--dim);letter-spacing:2px}
+  .knob .t2{font-size:40px;font-weight:600;margin:6px 0 2px;font-variant-numeric:tabular-nums}
+  .knob .t3{font-size:12px;color:var(--dim)}
+
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .row.tight .btn{flex:1;padding:11px 0;text-align:center}
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  .metric{background:var(--card2);border-radius:12px;padding:10px 8px;text-align:center}
+  .metric .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+  .metric .k{font-size:11px;color:var(--dim);margin-top:3px}
+
+  .label{font-size:12px;color:var(--dim);margin:14px 0 6px}
+  .field{display:flex;align-items:center;gap:8px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+  .field input{flex:1;background:transparent;border:0;color:var(--fg);font-size:14px;outline:none;min-width:0}
+  .field .unit{font-size:12px;color:var(--dim)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+
+  .log{font-size:12px;line-height:1.7;color:var(--dim);max-height:150px;overflow:auto;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .log div{white-space:pre-wrap;word-break:break-all}
+  .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;background:#20293e;color:var(--dim)}
+  .tag.ok{background:rgba(46,204,113,.15);color:var(--ok)}
+  .tag.err{background:rgba(255,92,92,.15);color:var(--err)}
+  .tag.warn{background:rgba(255,176,32,.15);color:var(--warn)}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#222c44;border:1px solid var(--line);color:var(--fg);padding:10px 18px;border-radius:99px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:99}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hint{font-size:12px;color:var(--dim);line-height:1.6}
+  .sep{height:1px;background:var(--line);margin:14px 0}
+  details summary{cursor:pointer;font-size:13px;color:var(--dim);outline:none}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div>
+    <h1>热水器开关</h1>
+    <div class="dev" id="devLine">未连接</div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button class="btn ghost" id="btnSim">模拟</button>
+    <button class="btn primary" id="btnConn">连接</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="dial">
+    <svg viewBox="0 0 230 230">
+      <circle class="ring-bg" cx="115" cy="115" r="104"></circle>
+      <circle class="ring-fg" id="ring" cx="115" cy="115" r="104" stroke-dasharray="653.45" stroke-dashoffset="653.45"></circle>
+    </svg>
+    <div class="knob" id="knob">
+      <div class="t1">OFF</div>
+      <div class="t2" id="knobMain">已关闭</div>
+      <div class="t3" id="knobSub">轻点开关</div>
+    </div>
+  </div>
+
+  <div class="row tight">
+    <button class="btn" data-preset="0" id="btnOn">立即打开</button>
+    <button class="btn" data-preset="900">15 分钟</button>
+    <button class="btn" data-preset="1800">30 分钟</button>
+  </div>
+  <div class="row tight" style="margin-top:8px">
+    <button class="btn" data-preset="2700">45 分钟</button>
+    <button class="btn" data-preset="3600">60 分钟</button>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><div class="v" id="mTemp">--</div><div class="k">水温</div></div>
+    <div class="metric"><div class="v" id="mTotal">0</div><div class="k">累计通电</div></div>
+    <div class="metric"><div class="v" id="mState">待机</div><div class="k">状态</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>设置（保存在设备里）</summary>
+    <div class="label">单次最长通电</div>
+    <div class="field"><input id="cfgMaxMin" type="number" min="1" max="120" step="1" value="60"><span class="unit">分钟</span></div>
+    <div class="label">超温保护阈值</div>
+    <div class="field"><input id="cfgTemp" type="number" min="40" max="90" step="1" value="75"><span class="unit">°C</span></div>
+    <div class="label">热水器功率（仅用于估算）</div>
+    <div class="field"><input id="cfgWatt" type="number" min="500" max="5000" step="100" value="2000"><span class="unit">W</span></div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn primary" id="btnSaveCfg">保存到设备</button>
+      <button class="btn" id="btnRefresh">刷新状态</button>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <details id="pairDetails">
+    <summary>连接说明 / 密钥备份 / 模拟设备</summary>
+    <div class="hint">第一次连接：点「连接」→ 在系统弹窗里选中 <b>WSP-</b> 开头的设备 → 自动配对，不需要输入任何密钥。这台手机会记住它，下次直接连。<br>换手机：长按设备上的按键 5 秒解绑，新手机再连即可。</div>
+    <div class="sep"></div>
+    <div class="label">密钥备份（可选，换浏览器/清缓存后恢复用）</div>
+    <div class="field"><input id="pairing" placeholder="WSP1-xxxxxxxxxxxxxxxx-XXXX…"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnSavePair">导入配对串</button>
+      <button class="btn ghost" id="btnClearPair">忘记本机密钥</button>
+    </div>
+    <div class="sep"></div>
+    <div class="hint">没有硬件也能先把界面点通：点右上角「模拟」，网页会在本地虚拟一台设备（同协议、同加密，出厂未绑定，会走一遍自动配对）。</div>
+    <div class="label">模拟水温</div>
+    <div class="field"><input id="simTemp" type="range" min="20" max="90" step="1" value="24"><span class="unit" id="simTempVal">24 °C</span></div>
+  </details>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span class="tag" id="linkTag">未连接</span>
+    <button class="btn ghost" style="padding:5px 10px;font-size:12px" id="btnClearLog">清空日志</button>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+'use strict';
+// ===================== 协议层（与 py/wsp.py 逐字节一致） =====================
+const UUID_SERVICE = '57535031-0001-4b1e-9d3a-0c0ffee0beef';
+const UUID_CMD     = '57535031-0002-4b1e-9d3a-0c0ffee0beef';
+const UUID_EVT     = '57535031-0003-4b1e-9d3a-0c0ffee0beef';
+const DEVICE_PREFIX = 'WSP-';
+const MAGIC = [0xA5, 0x5A];
+const MAX_PAYLOAD = 512;
+
+const T_REQ = 0x01, T_RSP = 0x02, T_EVT = 0x03, T_ERR = 0x04, T_SEC = 0x80;
+
+const CMD = {
+  HELLO: 0x01, HELLO_RSP: 0x81,
+  AUTH_BEGIN: 0x02, AUTH_CHALLENGE: 0x82,
+  AUTH_FINISH: 0x03, AUTH_OK: 0x83,
+  PAIR: 0x04, PAIR_OK: 0x84,
+  SET_POWER: 0x10, POWER_ACK: 0x90,
+  SET_TIMER: 0x11, TIMER_ACK: 0x91,
+  GET_STATUS: 0x20, STATUS_RSP: 0xA0,
+  SET_CFG: 0x21, CFG_ACK: 0xA1,
+  EVT_POWER: 0xE1, EVT_FAULT: 0xE2, EVT_TICK: 0xE5
+};
+const CMD_NAME = {
+  0x01:'HELLO',0x81:'HELLO_RSP',0x02:'AUTH_BEGIN',0x82:'AUTH_CHALLENGE',
+  0x03:'AUTH_FINISH',0x83:'AUTH_OK',0x04:'PAIR',0x84:'PAIR_OK',
+  0x10:'SET_POWER',0x90:'POWER_ACK',
+  0x11:'SET_TIMER',0x91:'TIMER_ACK',0x20:'GET_STATUS',0xA0:'STATUS_RSP',
+  0x21:'SET_CFG',0xA1:'CFG_ACK',0xE1:'EVT_POWER',0xE2:'EVT_FAULT',0xE5:'EVT_TICK'
+};
+const CAPS_BOUND = 0x8000;   // HELLO_RSP.caps 里的"已被某台手机绑定"位
+const ERR_NAME = {
+  0x01:'BAD_FRAME',0x02:'BAD_CRC',0x03:'BAD_STATE',0x04:'AUTH_REQUIRED',
+  0x05:'AUTH_FAILED',0x06:'REPLAY',0x07:'LIMIT',0x08:'BUSY',
+  0x09:'UNKNOWN_CMD',0x0A:'LOCKED_OUT'
+};
+const REASON_NAME = { 0:'', 1:'手动关闭', 2:'定时到点', 3:'超温保护', 4:'按键关闭', 5:'上电默认' };
+
+// ---- CRC-16/CCITT-FALSE ----
+function crc16ccitt(bytes) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i] << 8;
+    for (let b = 0; b < 8; b++) {
+      crc = (crc & 0x8000) ? (((crc << 1) ^ 0x1021) & 0xFFFF) : ((crc << 1) & 0xFFFF);
+    }
+  }
+  return crc;
+}
+
+function hex(bytes) {
+  let s = '';
+  for (const b of bytes) s += b.toString(16).padStart(2, '0');
+  return s;
+}
+function unhex(s) {
+  s = s.replace(/[^0-9a-fA-F]/g, '');
+  const out = new Uint8Array(s.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
+  return out;
+}
+function concat(...arrs) {
+  let n = 0; for (const a of arrs) n += a.length;
+  const out = new Uint8Array(n); let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+const te = new TextEncoder();
+function u16le(v) { return new Uint8Array([v & 0xFF, (v >> 8) & 0xFF]); }
+function u32le(v) { return new Uint8Array([v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]); }
+function rdU16(b, o) { return b[o] | (b[o + 1] << 8); }
+function rdU32(b, o) { return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0; }
+function rdI16(b, o) { const v = rdU16(b, o); return v >= 0x8000 ? v - 0x10000 : v; }
+
+// ---- base32（RFC4648 无填充） ----
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32Encode(bytes) {
+  let out = '', buf = 0, bits = 0;
+  for (const b of bytes) {
+    buf = ((buf << 8) | b) & 0xFFFF;
+    bits += 8;
+    while (bits >= 5) { out += B32[(buf >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits) out += B32[(buf << (5 - bits)) & 31];
+  return out;
+}
+function base32Decode(s) {
+  let buf = 0, bits = 0; const out = [];
+  for (const ch of s.toUpperCase()) {
+    const v = B32.indexOf(ch);
+    if (v < 0) continue;
+    buf = ((buf << 5) | v) & 0xFFFF; bits += 5;
+    if (bits >= 8) { out.push((buf >>> (bits - 8)) & 0xFF); bits -= 8; }
+  }
+  return Uint8Array.from(out);
+}
+
+// ---- 配对串 ----
+function makePairing(deviceId, psk) {
+  return 'WSP1-' + hex(deviceId) + '-' + base32Encode(psk);
+}
+function parsePairing(text) {
+  const m = /^WSP1-([0-9a-fA-F]{16})-([A-Za-z2-7]+)$/.exec((text || '').trim());
+  if (!m) throw new Error('配对串格式不对，应该形如 WSP1-0011223344556677-ABCD…');
+  const deviceId = unhex(m[1]);
+  const psk = base32Decode(m[2]);
+  if (psk.length !== 32) throw new Error('配对串里的密钥长度不对（解出 ' + psk.length + ' 字节）');
+  return { deviceId, psk };
+}
+
+// ---- WebCrypto ----
+const subtle = crypto.subtle;
+async function hmacSha256(key, data) {
+  const k = await subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await subtle.sign('HMAC', k, data));
+}
+async function hkdfSha256(ikm, salt, info, length = 32) {
+  const prk = await hmacSha256(salt, ikm);
+  const out = new Uint8Array(length);
+  let prev = new Uint8Array(0), pos = 0, counter = 1;
+  while (pos < length) {
+    prev = await hmacSha256(prk, concat(prev, info, new Uint8Array([counter])));
+    const n = Math.min(prev.length, length - pos);
+    out.set(prev.subarray(0, n), pos);
+    pos += n; counter++;
+  }
+  return out;
+}
+async function authMacClient(psk, deviceId, cnonce, dnonce) {
+  return (await hmacSha256(psk, concat(te.encode('WSP1-AUTH'), deviceId, cnonce, dnonce))).subarray(0, 16);
+}
+async function authMacDevice(psk, deviceId, cnonce, dnonce) {
+  return (await hmacSha256(psk, concat(te.encode('WSP1-ACK'), deviceId, dnonce, cnonce))).subarray(0, 16);
+}
+async function deriveSessionKey(psk, cnonce, dnonce) {
+  return hkdfSha256(psk, concat(cnonce, dnonce), te.encode('WSP1-SESSION'), 32);
+}
+
+// ---- 组帧：A5 5A | VER | TYPE | LEN(LE) | SEQ | CMD | PAYLOAD | [MAC4] | CRC16(LE) ----
+async function makeFrame(type, seq, cmd, payload, sessionKey) {
+  payload = payload || new Uint8Array(0);
+  const sec = !!sessionKey;
+  const head = concat(
+    new Uint8Array([MAGIC[0], MAGIC[1], 0x01, type | (sec ? T_SEC : 0)]),
+    u16le(payload.length),
+    new Uint8Array([seq & 0xFF, cmd]),
+    payload
+  );
+  let mac = new Uint8Array(0);
+  if (sec) mac = (await hmacSha256(sessionKey, head)).subarray(0, 4);
+  const body = concat(head, mac);
+  return concat(body, u16le(crc16ccitt(body)));
+}
+function syncFrame(type, seq, cmd) {
+  // 仅用于不需要密钥的场合（HELLO 等），同步返回
+  const head = concat(new Uint8Array([MAGIC[0], MAGIC[1], 0x01, type]), u16le(0), new Uint8Array([seq & 0xFF, cmd]));
+  return concat(head, u16le(crc16ccitt(head)));
+}
+
+// ---- 收包重组（只做 CRC 校验，MAC 交给 Session 异步验） ----
+class FrameReader {
+  constructor() { this.buf = new Uint8Array(0); this.errors = []; }
+  push(chunk) {
+    const frames = [];
+    this.buf = concat(this.buf, chunk);
+    for (;;) {
+      const b = this.buf;
+      if (b.length < 2) break;
+      if (!(b[0] === MAGIC[0] && b[1] === MAGIC[1])) {
+        let i = 1;
+        while (i + 1 < b.length && !(b[i] === MAGIC[0] && b[i + 1] === MAGIC[1])) i++;
+        this.buf = b.subarray(i);
+        continue;
+      }
+      if (b.length < 8) break;
+      const type = b[3];
+      const plen = rdU16(b, 4);
+      if (plen > MAX_PAYLOAD) { this.errors.push('len 太大 ' + plen); this.buf = b.subarray(1); continue; }
+      const sec = (type & T_SEC) !== 0;
+      const total = 8 + plen + (sec ? 4 : 0) + 2;
+      if (b.length < total) break;
+      const want = rdU16(b, total - 2);
+      if (crc16ccitt(b.subarray(0, total - 2)) !== want) {
+        this.errors.push('CRC 错');
+        this.buf = b.subarray(1);
+        continue;
+      }
+      frames.push({
+        type: type & 0x7F, secured: sec, seq: b[6], cmd: b[7],
+        payload: b.subarray(8, 8 + plen),
+        head: b.subarray(0, 8 + plen),
+        mac: sec ? b.subarray(8 + plen, 8 + plen + 4) : null,
+        raw: b.subarray(0, total)
+      });
+      this.buf = b.subarray(total);
+    }
+    return frames;
+  }
+}
+// 原生 APK（Capacitor）里的蓝牙：走 @capacitor-community/bluetooth-le 插件。
+// 浏览器里 window.Capacitor 不存在，这段完全不参与。
+class CapTransport {
+  constructor(plugin, deviceId) {
+    this.Ble = plugin;
+    this.deviceId = deviceId;
+    this.onNotify = null;
+    this.chain = Promise.resolve();      // 串行化：插件写入是异步的，连发两帧不能交错
+  }
+  write(bytes) {
+    const copy = Uint8Array.from(bytes); // 插件会跨进程序列化，必须拷一份
+    const job = async () => {
+      const CHUNK = 180;                 // 单次写入别超过 MTU 负载（握手后协商到 244 左右）
+      for (let off = 0; off < copy.length; off += CHUNK) {
+        const part = copy.subarray(off, Math.min(off + CHUNK, copy.length));
+        await this.Ble.write({
+          deviceId: this.deviceId,
+          service: UUID_SERVICE,
+          characteristic: UUID_CMD,
+          value: new DataView(part.buffer, part.byteOffset, part.byteLength)
+        });
+        if (off + CHUNK < copy.length) await new Promise(r => setTimeout(r, 12));
+      }
+    };
+    this.chain = this.chain.catch(() => {}).then(job).catch(e => {
+      log('蓝牙写入失败：' + (e && e.message ? e.message : e));
+    });
+    return this.chain;
+  }
+}
+
+// ===================== 会话 =====================
+// 传输层抽象：浏览器真机是 Web Bluetooth 特征值，APK 是 Capacitor 插件，模拟器是进程内对象
+class BleTransport {
+  constructor(charCmd, charEvt) { this.charCmd = charCmd; this.charEvt = charEvt; this.onNotify = null; }
+  async write(bytes) {
+    const CHUNK = 180;
+    for (let off = 0; off < bytes.length; off += CHUNK) {
+      const part = bytes.subarray(off, Math.min(off + CHUNK, bytes.length));
+      if (this.charCmd.properties.writeWithoutResponse) await this.charCmd.writeValueWithoutResponse(part);
+      else await this.charCmd.writeValueWithResponse(part);
+      if (off + CHUNK < bytes.length) await new Promise(r => setTimeout(r, 12));
+    }
+  }
+}
+
+class Session {
+  // psk 由 keyStore 按 deviceId 保管：第一次连接时设备未绑定 -> 自动生成并发 PAIR，
+  // 用户不需要输入任何东西（和商用蓝牙水控器一样：扫描、点设备、连上）。
+  constructor(transport, opts) {
+    opts = opts || {};
+    this.t = transport;
+    this.deviceId = null;
+    this.psk = null;
+    this.info = null;
+    this.bound = null;
+    this.justPaired = false;
+    this.keyStore = opts.keyStore || { get: () => null, save: () => {} };
+    this.reader = new FrameReader();
+    this.seq = 0;
+    this.state = 'NEW';
+    this.key = null;
+    this.cnonce = null;
+    this.dnonce = null;
+    this.status = { on: 0, remaining_s: 0, temp_x10: 0, total_on_s: 0, max_on_s: 3600, fault: 0 };
+    this.onStatus = () => {};
+    this.onEvent = () => {};
+    this.onError = () => {};
+    this.onState = () => {};
+    this.onPaired = () => {};
+  }
+  nextSeq() { this.seq = (this.seq + 1) & 0xFF; return this.seq; }
+  setState(s) { this.state = s; this.onState(s); }
+
+  async send(type, cmd, payload, secured) {
+    const frame = await makeFrame(type, this.nextSeq(), cmd, payload, secured ? this.key : null);
+    await this.t.write(frame);
+  }
+
+  async start() {
+    this.setState('HELLO');
+    await this.send(T_REQ, CMD.HELLO, null, false);
+  }
+
+  async feed(chunk) {
+    const frames = this.reader.push(chunk);
+    for (const f of frames) {
+      try { await this.handle(f); }
+      catch (e) { this.onError(e.message || String(e)); }
+    }
+  }
+
+  async handle(f) {
+    if (f.secured) {
+      if (!this.key) { this.onError('收到加密帧但还没认证'); return; }
+      const mac = (await hmacSha256(this.key, f.head)).subarray(0, 4);
+      if (hex(mac) !== hex(f.mac)) { this.onError('MAC 校验失败（帧被篡改）'); return; }
+    }
+    const name = CMD_NAME[f.cmd] || ('0x' + f.cmd.toString(16));
+    log((f.type === T_EVT ? 'EVT ' : 'RSP ') + name + (f.payload.length ? '  ' + hex(f.payload) : ''));
+
+    switch (f.cmd) {
+      case CMD.HELLO_RSP: {
+        const p = f.payload;
+        const nameLen = p[15];
+        this.deviceId = p.slice(0, 8);
+        this.info = {
+          deviceId: this.deviceId,
+          fw: p[8] + '.' + p[9] + '.' + p[10],
+          caps: rdU16(p, 11),
+          mtu: rdU16(p, 13),
+          name: new TextDecoder().decode(p.subarray(16, 16 + nameLen))
+        };
+        this.bound = !!(this.info.caps & CAPS_BOUND);
+        this.info.bound = this.bound;
+        const saved = this.psk || this.keyStore.get(this.deviceId);
+        if (!this.bound) {
+          // 出厂/已解绑：直接替用户生成密钥并配对
+          this.psk = saved || crypto.getRandomValues(new Uint8Array(32));
+          this.setState('PAIRING');
+          await this.send(T_REQ, CMD.PAIR, this.psk, false);
+          return;
+        }
+        if (!saved) {
+          this.setState('NO_KEY');
+          this.onError('这台设备已经绑过别的手机。要换手机，请长按设备上的按键 5 秒解绑，再来连接。');
+          return;
+        }
+        this.psk = saved;
+        this.cnonce = crypto.getRandomValues(new Uint8Array(16));
+        this.setState('AUTH');
+        await this.send(T_REQ, CMD.AUTH_BEGIN, this.cnonce, false);
+        return;
+      }
+      case CMD.PAIR_OK: {
+        this.justPaired = true;
+        this.keyStore.save(this.deviceId, this.psk);
+        this.onPaired(this.info);
+        this.cnonce = crypto.getRandomValues(new Uint8Array(16));
+        this.setState('AUTH');
+        await this.send(T_REQ, CMD.AUTH_BEGIN, this.cnonce, false);
+        return;
+      }
+      case CMD.AUTH_CHALLENGE: {
+        const dnonce = f.payload.subarray(0, 16);
+        if (dnonce.length !== 16) { this.onError('dnonce 长度不对'); return; }
+        this.dnonce = dnonce;
+        const macC = await authMacClient(this.psk, this.deviceId, this.cnonce, dnonce);
+        this.setState('AUTH_FINISH');
+        await this.send(T_REQ, CMD.AUTH_FINISH, macC, false);
+        return;
+      }
+      case CMD.AUTH_OK: {
+        const macS = f.payload.subarray(0, 16);
+        const want = await authMacDevice(this.psk, this.deviceId, this.cnonce, this.dnonce);
+        if (hex(macS) !== hex(want)) { this.setState('FAIL'); this.onError('设备应答 MAC 不对：密钥不匹配'); return; }
+        this.key = await deriveSessionKey(this.psk, this.cnonce, this.dnonce);
+        this.keyStore.save(this.deviceId, this.psk);
+        this.setState('READY');
+        await this.getStatus();
+        return;
+      }
+      case CMD.STATUS_RSP: {
+        const p = f.payload;
+        if (p.length < 16) { this.onError('STATUS_RSP 长度不足'); return; }
+        this.status = {
+          on: p[0], remaining_s: rdU32(p, 1), temp_x10: rdI16(p, 5),
+          total_on_s: rdU32(p, 7), max_on_s: rdU32(p, 11), fault: p[15]
+        };
+        this.onStatus(this.status);
+        return;
+      }
+      case CMD.POWER_ACK: {
+        this.status.on = f.payload[0];
+        this.status.remaining_s = rdU32(f.payload, 1);
+        const reason = f.payload[5];
+        toast(f.payload[0] ? '已通电' : ('已关闭' + (reason ? '（' + (REASON_NAME[reason] || reason) + '）' : '')));
+        this.onStatus(this.status);
+        await this.getStatus();
+        return;
+      }
+      case CMD.TIMER_ACK: {
+        this.status.remaining_s = rdU32(f.payload, 0);
+        toast('定时已设为 ' + fmtLeft(this.status.remaining_s));
+        this.onStatus(this.status);
+        return;
+      }
+      case CMD.CFG_ACK: {
+        toast('设置已保存');
+        await this.getStatus();
+        return;
+      }
+      case CMD.EVT_POWER: {
+        this.status.on = f.payload[0];
+        this.status.remaining_s = rdU32(f.payload, 1);
+        const reason = f.payload[5];
+        this.onStatus(this.status);
+        this.onEvent({ kind: 'power', on: f.payload[0], reason });
+        if (!f.payload[0] && reason) toast('已断电：' + (REASON_NAME[reason] || reason));
+        return;
+      }
+      case CMD.EVT_FAULT: {
+        this.status.fault = f.payload[0];
+        toast('⚠ 故障保护已触发');
+        this.onStatus(this.status);
+        return;
+      }
+      case CMD.EVT_TICK: {
+        this.status.on = f.payload[0];
+        this.status.remaining_s = rdU32(f.payload, 1);
+        this.status.temp_x10 = rdI16(f.payload, 5);
+        this.onStatus(this.status);
+        return;
+      }
+      default: {
+        if (f.type === T_ERR) {
+          const code = f.payload[0], detail = f.payload[1];
+          if (code === 0x05 || code === 0x0A || this.state === 'AUTH_FINISH') this.setState('FAIL');
+          this.onError('设备报错：' + (ERR_NAME[code] || code) + (detail ? ' / ' + detail : '') + '（' + name + '）');
+        }
+      }
+    }
+  }
+
+  async power(on, durationS) {
+    const p = concat(new Uint8Array([on ? 1 : 0]), u32le(durationS | 0));
+    await this.send(T_REQ, CMD.SET_POWER, p, true);
+  }
+  async setTimer(sec) { await this.send(T_REQ, CMD.SET_TIMER, u32le(sec | 0), true); }
+  async getStatus() { await this.send(T_REQ, CMD.GET_STATUS, null, true); }
+  async setCfg(maxOnS, tempLimitX10, nominalW) {
+    await this.send(T_REQ, CMD.SET_CFG, concat(u32le(maxOnS | 0), u16le(tempLimitX10 | 0), u16le(nominalW | 0)), true);
+  }
+}
+
+// ===================== 模拟设备（无硬件时用） =====================
+class SimDevice {
+  constructor(deviceId, psk, name) {
+    this.deviceId = deviceId;
+    this.psk = psk || null;
+    this.bound = !!psk;          // 出厂是"未绑定"，等第一台手机来 PAIR
+    this.name = name || 'WSP-SIM';
+    this.power = false;
+    this.remaining = 0;
+    this.total = 0;
+    this.tempX10 = 240;
+    this.fault = 0;
+    this.lastReason = 5;
+    this.maxOnS = 3600;
+    this.tempLimitX10 = 750;
+    this.nominalW = 2000;
+    this.key = null;
+    this.cnonce = null;
+    this.dnonce = null;
+    this.dnonceAt = 0;
+    this.lastSeq = -1;
+    this.seq = 0;
+    this.out = [];
+    this.fails = 0;
+  }
+  nextSeq() { this.seq = (this.seq + 1) & 0xFF; return this.seq; }
+  async reply(cmd, payload, secured) {
+    this.out.push(await makeFrame(T_RSP, this.nextSeq(), cmd, payload, secured === false ? null : this.key));
+  }
+  async err(code, detail) {
+    this.out.push(await makeFrame(T_ERR, this.nextSeq(), 0x00, new Uint8Array([code, detail || 0]), null));
+  }
+  async notify(cmd, payload) {
+    if (this.key) this.out.push(await makeFrame(T_EVT, this.nextSeq(), cmd, payload, this.key));
+  }
+  async tick(dt, tempC) {
+    if (tempC !== undefined) this.tempX10 = Math.round(tempC * 10);
+    if (this.power) {
+      this.remaining -= dt;
+      this.total += dt;
+      if (this.tempX10 > this.tempLimitX10) {
+        this.fault = 1;
+        await this.forceOff(3);
+        await this.notify(CMD.EVT_FAULT, new Uint8Array([1, Math.min(255, Math.max(0, this.tempX10 / 10 | 0))]));
+      } else if (this.remaining <= 0) {
+        await this.forceOff(2);
+      }
+    }
+  }
+  async forceOff(reason) {
+    if (!this.power) return;
+    this.power = false; this.remaining = 0; this.lastReason = reason;
+    await this.notify(CMD.EVT_POWER, concat(new Uint8Array([0]), u32le(0), new Uint8Array([reason])));
+  }
+  async powerOn(durationS) {
+    if (this.fault) return false;
+    let dur = durationS > 0 ? durationS : this.maxOnS;
+    if (dur > this.maxOnS) dur = this.maxOnS;
+    this.power = true; this.remaining = dur; this.lastReason = 0;
+    return true;
+  }
+  async handle(bytes) {
+    const reader = new FrameReader();
+    const frames = reader.push(bytes);
+    for (const f of frames) await this.handleFrame(f);
+    const out = this.out.slice();
+    this.out.length = 0;
+    return out;
+  }
+  async handleFrame(f) {
+    if (f.cmd === CMD.HELLO) {
+      const nm = te.encode(this.name);
+      const caps = 0x0006 | (this.bound ? CAPS_BOUND : 0);
+      const p = concat(this.deviceId, new Uint8Array([1, 1, 0]), u16le(caps), u16le(244), new Uint8Array([nm.length]), nm);
+      await this.reply(CMD.HELLO_RSP, p, false);
+      return;
+    }
+    if (f.cmd === CMD.PAIR) {
+      if (this.bound) { await this.err(0x03); return; }
+      if (f.payload.length !== 32) { await this.err(0x01); return; }
+      this.psk = f.payload.slice(0, 32);
+      this.bound = true;
+      await this.reply(CMD.PAIR_OK, this.deviceId, false);
+      return;
+    }
+    if (f.cmd === CMD.AUTH_BEGIN) {
+      if (!this.bound || !this.psk) { await this.err(0x05); return; }
+      this.cnonce = f.payload.subarray(0, 16);
+      this.dnonce = crypto.getRandomValues(new Uint8Array(16));
+      this.dnonceAt = performance.now();
+      this.lastSeq = -1;
+      await this.reply(CMD.AUTH_CHALLENGE, this.dnonce, false);
+      return;
+    }
+    if (f.cmd === CMD.AUTH_FINISH) {
+      if (!this.bound || !this.psk) { await this.err(0x05); return; }
+      if (!this.cnonce || !this.dnonce) { await this.err(0x03); return; }
+      if (performance.now() - this.dnonceAt > 60000) { await this.err(0x06); return; }
+      const want = await authMacClient(this.psk, this.deviceId, this.cnonce, this.dnonce);
+      if (hex(want) !== hex(f.payload.subarray(0, 16))) {
+        this.fails++;
+        await this.err(0x05, this.fails);
+        return;
+      }
+      this.key = await deriveSessionKey(this.psk, this.cnonce, this.dnonce);
+      const macS = await authMacDevice(this.psk, this.deviceId, this.cnonce, this.dnonce);
+      await this.reply(CMD.AUTH_OK, concat(macS, u16le(1)), false);
+      return;
+    }
+    if (!this.key || !f.secured) { await this.err(0x04); return; }
+    const mac = (await hmacSha256(this.key, f.head)).subarray(0, 4);
+    if (hex(mac) !== hex(f.mac)) { await this.err(0x02); return; }
+    const delta = (f.seq - this.lastSeq) & 0xFF;
+    if (this.lastSeq >= 0 && (delta === 0 || delta > 127)) { await this.err(0x06); return; }
+    this.lastSeq = f.seq;
+
+    switch (f.cmd) {
+      case CMD.SET_POWER: {
+        const want = f.payload[0] !== 0, dur = rdU32(f.payload, 1);
+        if (want) {
+          const ok = await this.powerOn(dur);
+          if (!ok) { await this.err(0x07); return; }
+        } else {
+          this.power = false; this.remaining = 0; this.lastReason = 1;
+        }
+        await this.reply(CMD.POWER_ACK, concat(new Uint8Array([this.power ? 1 : 0]), u32le(this.remaining), new Uint8Array([this.lastReason])));
+        return;
+      }
+      case CMD.SET_TIMER: {
+        if (!this.power) { await this.err(0x03); return; }
+        let sec = rdU32(f.payload, 0);
+        if (sec < 1) sec = 1;
+        if (sec > this.maxOnS) sec = this.maxOnS;
+        this.remaining = sec;
+        await this.reply(CMD.TIMER_ACK, u32le(sec));
+        return;
+      }
+      case CMD.GET_STATUS: {
+        const p = concat(
+          new Uint8Array([this.power ? 1 : 0]), u32le(this.remaining), u16le(this.tempX10 & 0xFFFF),
+          u32le(this.total), u32le(this.maxOnS), new Uint8Array([this.fault])
+        );
+        await this.reply(CMD.STATUS_RSP, p);
+        return;
+      }
+      case CMD.SET_CFG: {
+        let maxOn = rdU32(f.payload, 0), tlim = rdI16(f.payload, 4), watt = rdU16(f.payload, 6);
+        this.maxOnS = Math.max(60, Math.min(7200, maxOn));
+        this.tempLimitX10 = Math.max(400, Math.min(900, tlim));
+        this.nominalW = watt;
+        if (this.power && this.remaining > this.maxOnS) this.remaining = this.maxOnS;
+        await this.reply(CMD.CFG_ACK, null);
+        return;
+      }
+      default:
+        await this.err(0x09, f.cmd);
+    }
+  }
+}
+
+class SimTransport {
+  constructor(device) { this.device = device; this.onNotify = null; }
+  async write(bytes) {
+    const out = await this.device.handle(bytes);
+    for (const chunk of out) {
+      if (this.onNotify) this.onNotify(chunk);
+      await new Promise(r => setTimeout(r, 5));
+    }
+  }
+}
+
+// ===================== 界面 =====================
+const $ = id => document.getElementById(id);
+const KEY_PREFIX = 'wsp.psk.';
+// 每台设备一把密钥，按 deviceId 存本地；用户全程不用看到它
+const keyStore = {
+  get(deviceId) {
+    const v = localStorage.getItem(KEY_PREFIX + hex(deviceId));
+    if (!v) return null;
+    try { const k = unhex(v); return k.length === 32 ? k : null; } catch (e) { return null; }
+  },
+  save(deviceId, psk) {
+    if (deviceId && psk && psk.length === 32) localStorage.setItem(KEY_PREFIX + hex(deviceId), hex(psk));
+  },
+  forget(deviceId) { localStorage.removeItem(KEY_PREFIX + hex(deviceId)); }
+};
+
+const APP = {
+  session: null, link: null, sim: null, connected: false, mode: null,
+  psk: null, deviceId: null, name: null, tick: 0, maxOnS: 3600,
+  dialLen: 653.45
+};
+
+function log(msg) {
+  const el = $('log');
+  const d = document.createElement('div');
+  const t = new Date().toTimeString().slice(0, 8);
+  d.textContent = t + '  ' + msg;
+  el.appendChild(d);
+  while (el.children.length > 200) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+let toastTimer = null;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+function fmtLeft(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec <= 0) return '0 分钟';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m >= 60) return Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
+  return s ? (m + ' 分 ' + s + ' 秒') : (m + ' 分钟');
+}
+
+function setConnected(on, label, cls) {
+  APP.connected = on;
+  $('linkTag').textContent = label;
+  $('linkTag').className = 'tag' + (cls ? ' ' + cls : '');
+  $('btnConn').textContent = on ? '断开' : '连接';
+  $('devLine').innerHTML = on
+    ? '已连接 <b>' + (APP.name || '') + '</b>' + (APP.mode === 'sim' ? ' · 模拟' : '')
+    : '未连接';
+}
+
+function renderStatus(st) {
+  if (!st) return;
+  const on = !!st.on;
+  const fault = !!st.fault;
+  const knob = $('knob');
+  knob.classList.toggle('on', on && !fault);
+  knob.classList.toggle('fault', fault);
+  $('knobMain').textContent = fault ? '保护中' : (on ? fmtLeft(st.remaining_s) : '已关闭');
+  $('knobSub').textContent = fault ? '超温保护，点按清除' : (on ? '剩余时间' : '轻点开关');
+  knob.querySelector('.t1').textContent = fault ? 'FAULT' : (on ? 'ON' : 'OFF');
+
+  const pct = on && st.max_on_s ? Math.min(1, st.remaining_s / Math.min(st.max_on_s, 3600)) : 0;
+  $('ring').style.strokeDashoffset = String(APP.dialLen * (1 - pct));
+  $('ring').style.stroke = fault ? '#ff5c5c' : (on ? '#2ecc71' : '#4f8cff');
+
+  $('mTemp').textContent = (st.temp_x10 === undefined || st.temp_x10 === null) ? '--' : (st.temp_x10 / 10).toFixed(1) + '°';
+  const tot = st.total_on_s || 0;
+  $('mTotal').textContent = tot >= 3600 ? (tot / 3600).toFixed(1) + ' h' : Math.round(tot / 60) + ' min';
+  $('mState').textContent = fault ? '故障' : (on ? '加热中' : '待机');
+  APP.maxOnS = st.max_on_s || APP.maxOnS;
+  APP.status = st;
+
+  // 同步设置面板（只在非编辑时）
+  if (document.activeElement !== $('cfgMaxMin')) $('cfgMaxMin').value = Math.max(1, Math.round((st.max_on_s || 3600) / 60));
+  if (document.activeElement !== $('cfgTemp')) {
+    const tv = APP.tempLimitX10 || 750;
+    $('cfgTemp').value = Math.round(tv / 10);
+  }
+}
+
+async function setupSession(transport, mode) {
+  const ses = new Session(transport, { keyStore });
+  transport.onNotify = chunk => { ses.feed(chunk).catch(e => log('解析出错：' + e.message)); };
+  ses.onStatus = renderStatus;
+  ses.onState = s => {
+    log('状态 → ' + s);
+    if (s === 'PAIRING') setConnected(false, '首次配对中…', 'warn');
+    if (s === 'AUTH') setConnected(false, '认证中…', 'warn');
+    if (s === 'READY') {
+      APP.deviceId = ses.deviceId;
+      APP.psk = ses.psk;
+      APP.name = ses.info && ses.info.name;
+      setConnected(true, '已连接', 'ok');
+    }
+    if (s === 'NO_KEY') { setConnected(false, '需要解绑', 'err'); }
+    if (s === 'FAIL') { setConnected(false, '密钥不对', 'err'); }
+  };
+  ses.onPaired = info => {
+    log('首次配对完成，已记住这台设备（' + hex(ses.deviceId) + '）');
+    toast('已配对：' + ((info && info.name) || '设备'));
+  };
+  ses.onError = msg => { log('⚠ ' + msg); toast(msg); };
+  ses.onEvent = ev => { if (ev.kind === 'power') log('事件：' + (ev.on ? '通电' : '断电') + '（' + (REASON_NAME[ev.reason] || '') + '）'); };
+  APP.session = ses;
+  await ses.start();
+  return ses;
+}
+
+async function connectBle() {
+  if (!navigator.bluetooth) { toast('这个浏览器不支持 Web Bluetooth，请用 Chrome/Edge/Bluefy'); return; }
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: DEVICE_PREFIX }],
+      optionalServices: [UUID_SERVICE]
+    });
+    device.addEventListener('gattserverdisconnected', () => {
+      setConnected(false, '已断开', 'err');
+      APP.session = null;
+      toast('连接已断开');
+    });
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(UUID_SERVICE);
+    const charCmd = await svc.getCharacteristic(UUID_CMD);
+    const charEvt = await svc.getCharacteristic(UUID_EVT);
+    await charEvt.startNotifications();
+    const transport = new BleTransport(charCmd, charEvt);
+    charEvt.addEventListener('characteristicvaluechanged', ev => {
+      const v = ev.target.value;
+      if (transport.onNotify) transport.onNotify(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+    });
+    APP.mode = 'ble';
+    APP.link = device;
+    setConnected(false, '握手中…', 'warn');
+    await setupSession(transport, 'ble');
+  } catch (e) {
+    log('连接失败：' + (e.message || e));
+    toast('连接失败：' + (e.message || e));
+    setConnected(false, '未连接', 'err');
+  }
+}
+
+// ---- 原生 APK（Capacitor）：同一套协议，只是把"特征值读写"换成插件调用 ----
+const NATIVE_BLE = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Ble);
+const CapBle = NATIVE_BLE ? window.Capacitor.Plugins.Ble : null;
+
+async function connectNative() {
+  try {
+    await CapBle.initialize();
+    const device = await CapBle.requestDevice({ namePrefix: DEVICE_PREFIX, optionalServices: [UUID_SERVICE] });
+    await CapBle.connect({ deviceId: device.deviceId });
+    await CapBle.startNotifications({ deviceId: device.deviceId, service: UUID_SERVICE, characteristic: UUID_EVT });
+    const transport = new CapTransport(CapBle, device.deviceId);
+    CapBle.addListener('notification', ev => {
+      const dv = ev.value;
+      if (transport.onNotify) transport.onNotify(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
+    });
+    CapBle.addListener('disconnected', ev => {
+      if (APP.link === ev.deviceId) {
+        setConnected(false, '已断开', 'err');
+        APP.session = null;
+        toast('连接已断开（继电器状态不受影响）');
+      }
+    });
+    APP.mode = 'ble';
+    APP.link = device.deviceId;
+    if (!APP.name) APP.name = device.name || device.localName || '';
+    setConnected(false, '握手中…', 'warn');
+    await setupSession(transport, 'ble');
+  } catch (e) {
+    log('连接失败：' + (e.message || e));
+    toast('连接失败：' + (e.message || e));
+    setConnected(false, '未连接', 'err');
+  }
+}
+
+function connectSim() {  // 模拟设备也按"出厂未绑定"启动：第一次点会走一遍自动配对，之后本机会记住密钥
+  let simId = localStorage.getItem('wsp.sim.devid');
+  if (!simId) { simId = hex(crypto.getRandomValues(new Uint8Array(8))); localStorage.setItem('wsp.sim.devid', simId); }
+  const devId = unhex(simId);
+  APP.sim = new SimDevice(devId, keyStore.get(devId), 'WSP-SIM');
+  APP.sim.tempX10 = Math.round(parseFloat($('simTemp').value) * 10);
+  APP.mode = 'sim';
+  APP.name = 'WSP-SIM';
+  APP.deviceId = devId;
+  log('模拟设备已启动（设备 ID ' + simId + '）');
+  const transport = new SimTransport(APP.sim);
+  setConnected(false, '握手中…', 'warn');
+  setupSession(transport, 'sim').catch(e => log('握手失败：' + e.message));
+  clearInterval(APP.simTimer);
+  APP.simTimer = setInterval(async () => {
+    if (!APP.sim) return;
+    const t = parseFloat($('simTemp').value);
+    await APP.sim.tick(0.25, t);
+    const out = APP.sim.out.slice();
+    APP.sim.out.length = 0;
+    for (const chunk of out) if (transport.onNotify) transport.onNotify(chunk);
+  }, 250);
+}
+
+function openPairing() {
+  const d = $('pairDetails');
+  if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  $('pairing').focus();
+}
+
+function disconnect() {
+  if (APP.mode === 'ble') {
+    if (NATIVE_BLE && APP.link) {
+      CapBle.disconnect({ deviceId: APP.link }).catch(() => {});
+    } else if (APP.link && APP.link.gatt && APP.link.gatt.connected) {
+      APP.link.gatt.disconnect();
+    }
+  }
+  APP.link = null;
+  APP.session = null;
+  APP.sim = null;
+  clearInterval(APP.simTimer);
+  setConnected(false, '未连接', '');
+}
+
+// ---- 事件绑定 ----
+$('btnConn').onclick = () => {
+  if (APP.session) { disconnect(); return; }
+  if (NATIVE_BLE) { connectNative(); return; }      // APK 里走原生蓝牙
+  if (!navigator.bluetooth) { connectSim(); return; }
+  connectBle();
+};
+$('btnSim').onclick = () => {
+  if (APP.session) disconnect();
+  connectSim();
+};
+$('knob').onclick = async () => {
+  const s = APP.session;
+  if (!s || s.state !== 'READY') { toast(APP.session ? '还没握手完' : '先连接设备'); return; }
+  const st = s.status || {};
+  if (st.fault) {
+    toast('保护中，请按设备上的按键清除故障');
+    return;
+  }
+  if (st.on) await s.power(false, 0);
+  else await s.power(true, 0);
+};
+document.querySelectorAll('[data-preset]').forEach(btn => {
+  btn.onclick = async () => {
+    const s = APP.session;
+    if (!s || s.state !== 'READY') { toast('先连接设备'); return; }
+    const sec = parseInt(btn.dataset.preset, 10);
+    if (sec === 0) { await s.power(true, 0); return; }
+    if (s.status && s.status.on) await s.setTimer(sec);
+    else await s.power(true, sec);
+  };
+});
+$('btnSaveCfg').onclick = async () => {
+  const s = APP.session;
+  if (!s || s.state !== 'READY') { toast('先连接设备'); return; }
+  const maxMin = Math.max(1, Math.min(120, parseInt($('cfgMaxMin').value, 10) || 60));
+  const tlim = Math.max(40, Math.min(90, parseInt($('cfgTemp').value, 10) || 75));
+  const watt = Math.max(500, Math.min(5000, parseInt($('cfgWatt').value, 10) || 2000));
+  APP.tempLimitX10 = tlim * 10;
+  await s.setCfg(maxMin * 60, tlim * 10, watt);
+};
+$('btnRefresh').onclick = async () => {
+  const s = APP.session;
+  if (!s || s.state !== 'READY') { toast('先连接设备'); return; }
+  await s.getStatus();
+  toast('已刷新');
+};
+$('btnSavePair').onclick = () => {
+  try {
+    const { deviceId, psk } = parsePairing($('pairing').value);
+    keyStore.save(deviceId, psk);
+    APP.deviceId = deviceId; APP.psk = psk;
+    localStorage.removeItem('wsp.pairing');
+    toast('配对串已导入本机');
+    log('已导入密钥，设备 ID = ' + hex(deviceId));
+  } catch (e) { toast(e.message); }
+};
+$('btnClearPair').onclick = () => {
+  const id = (APP.session && APP.session.deviceId) || APP.deviceId || (APP.sim && APP.sim.deviceId);
+  if (id) keyStore.forget(id);
+  localStorage.removeItem('wsp.pairing');
+  APP.psk = null;
+  $('pairing').value = '';
+  toast('已忘记本机密钥（设备那边还记着，长按按键 5 秒可解绑）');
+};
+$('simTemp').oninput = () => { $('simTempVal').textContent = $('simTemp').value + ' °C'; };
+$('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
+
+// 旧版本存的是整条配对串：迁移成按设备存的密钥，之后就不用再填了
+(function restoreLegacy() {
+  const saved = localStorage.getItem('wsp.pairing');
+  if (!saved) return;
+  try {
+    const { deviceId, psk } = parsePairing(saved);
+    keyStore.save(deviceId, psk);
+    localStorage.removeItem('wsp.pairing');
+    log('已把旧的配对串迁移为本机密钥（设备 ' + hex(deviceId) + '）');
+  } catch (e) { log('旧的配对串无效：' + e.message); }
+})();
+
+if (!navigator.bluetooth && !NATIVE_BLE) {
+  log('提示：当前环境没有蓝牙接口（浏览器需要 https；APK 需要装蓝牙插件）。可以点右上角「模拟」先用模拟设备点通界面。');
+}
+</script>
+</body>
+</html>
