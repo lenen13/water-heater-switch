@@ -1,9 +1,11 @@
 name: build-apk
 
-# 说明：这个工作流在 GitHub 的服务器上编译 APK，你本地不需要装 Android SDK。
-# 触发方式：仓库页面 Actions → build-apk → Run workflow；
-# 或者往 main 分支推 web/ apk/ 相关改动时自动跑。
-# 产物：Actions 运行详情页底部的 Artifacts → wsp-heater-debug-apk。
+# 说明：这个工作流在 GitHub 的服务器上编译 APK 和 ESP32 固件，你本地不需要装 Android SDK / PlatformIO。
+# 触发方式：仓库页面 Actions → 选左侧 build-apk → Run workflow；
+# 或者往 main 分支推 web/ apk/ firmware/ 相关改动时自动跑。
+# 产物：Actions 运行详情页底部的 Artifacts
+#   · wsp-heater-debug-apk → app-debug.apk（安卓安装包）
+#   · wsp-firmware         → firmware.bin + 合并好的单文件（ESP32-C3 烧录用）
 
 on:
   workflow_dispatch:
@@ -12,6 +14,7 @@ on:
     paths:
       - 'web/**'
       - 'apk/**'
+      - 'firmware/**'
       - 'tools/sync_site.mjs'
       - 'tools/patch_android.mjs'
       - '.github/workflows/build-apk.yml'
@@ -73,5 +76,57 @@ jobs:
         with:
           name: wsp-heater-debug-apk
           path: apk/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 缓存 PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+
+      - name: 安装 PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio esptool
+
+      - name: 编译固件
+        run: pio run -d firmware
+
+      - name: 合并成单个烧录文件
+        run: |
+          B=firmware/.pio/build/esp32c3
+          echo "--- 构建产物 ---"
+          ls -l "$B"
+          PKG=$(find ~/.platformio/packages -maxdepth 1 -name 'framework-arduinoespressif32*' | head -n1)
+          echo "framework: $PKG"
+          python -m esptool --chip esp32c3 merge_bin \
+            -o "$B/wsp-firmware-merged.bin" \
+            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            0x0 "$B/bootloader.bin" \
+            0x8000 "$B/partitions.bin" \
+            0xe000 "$PKG/tools/partitions/boot_app0.bin" \
+            0x10000 "$B/firmware.bin"
+          ls -l "$B/wsp-firmware-merged.bin"
+
+      - name: 上传固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsp-firmware
+          path: |
+            firmware/.pio/build/esp32c3/firmware.bin
+            firmware/.pio/build/esp32c3/wsp-firmware-merged.bin
           if-no-files-found: error
           retention-days: 30
