@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+apk/android/
+apk/.gradle/
+
+# Python
+__pycache__/
+*.pyc
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# 逆向用的原厂源码（体积大，按需单独存放）
+waterctl-2.x/
+wateremu-master/
+
+# 注意：docs/index.html 和 apk/www/index.html 是生成物，但必须提交
+# （Pages 直接发布 docs/，APK 构建也用它们），所以不要忽略。
