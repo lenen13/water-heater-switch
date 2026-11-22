@@ -63,6 +63,10 @@
   .hint{font-size:12px;color:var(--dim);line-height:1.6}
   .sep{height:1px;background:var(--line);margin:14px 0}
   details summary{cursor:pointer;font-size:13px;color:var(--dim);outline:none}
+  .banner{font-size:12.5px;line-height:1.55;border-radius:12px;padding:10px 13px;margin:10px 0 0;border:1px solid var(--line);background:rgba(255,255,255,.03)}
+  .banner.ok{border-color:rgba(64,200,140,.45);color:#7fe0b0}
+  .banner.err{border-color:rgba(255,110,110,.5);color:#ff9b9b}
+  .banner.warn{border-color:rgba(255,200,80,.45);color:#ffd784}
 </style>
 </head>
 <body>
@@ -74,9 +78,11 @@
   </div>
   <div style="display:flex;gap:8px">
     <button class="btn ghost" id="btnSim">模拟</button>
-    <button class="btn primary" id="btnConn">连接</button>
+    <button class="btn primary" id="btnConn">连接设备</button>
   </div>
 </div>
+
+<div id="envBanner" class="banner" style="display:none"></div>
 
 <div class="card">
   <div class="dial">
@@ -126,7 +132,7 @@
 
 <div class="card">
   <details id="pairDetails">
-    <summary>连接说明 / 密钥备份 / 模拟设备</summary>
+    <summary>高级：密钥备份 / 模拟设置（正常用不到，不用填任何东西）</summary>
     <div class="hint">第一次连接：点「连接」→ 在系统弹窗里选中 <b>WSP-</b> 开头的设备 → 自动配对，不需要输入任何密钥。这台手机会记住它，下次直接连。<br>换手机：长按设备上的按键 5 秒解绑，新手机再连即可。</div>
     <div class="sep"></div>
     <div class="label">密钥备份（可选，换浏览器/清缓存后恢复用）</div>
@@ -905,8 +911,34 @@ async function connectBle() {
 }
 
 // ---- 原生 APK（Capacitor）：同一套协议，只是把"特征值读写"换成插件调用 ----
-const NATIVE_BLE = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Ble);
-const CapBle = NATIVE_BLE ? window.Capacitor.Plugins.Ble : null;
+const CapPlugins = (window.Capacitor && window.Capacitor.Plugins) || null;
+const CapBle = CapPlugins ? (CapPlugins.Ble || CapPlugins.BluetoothLe || null) : null;
+const NATIVE_BLE = !!CapBle;
+const WEB_BLE = !!(navigator.bluetooth && navigator.bluetooth.requestDevice);
+const IN_CAPACITOR = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+
+function setBanner(text, kind) {
+  const el = $('envBanner');
+  if (!el) return;
+  el.style.display = text ? 'block' : 'none';
+  el.className = 'banner ' + (kind || '');
+  el.innerHTML = text;
+}
+
+function explainNoBle() {
+  if (IN_CAPACITOR) {
+    setBanner('⚠ 这是 APK，但页面里的蓝牙插件没加载成功。请安装最新版 APK（Actions 里下载的那个），或改用网页版。', 'err');
+    log('⚠ 原生蓝牙不可用：Capacitor.Plugins.Ble 为空');
+    toast('蓝牙插件没加载，请装最新 APK');
+    return;
+  }
+  setBanner('⚠ 当前浏览器<b>不支持蓝牙直连</b>（只有 Chrome / Edge 支持，且必须是 https 页面）。<br>'
+    + '想真连设备：① 用 <b>Chrome</b> 打开 '
+    + '<b>https://lenen13.github.io/water-heater-switch/</b>；② 或安装 APK。<br>'
+    + '只是先看界面：点右上角「模拟」。', 'err');
+  log('⚠ navigator.bluetooth 不存在，本页只能模拟');
+  toast('这个浏览器不支持蓝牙，请用 Chrome 或装 APK');
+}
 
 async function connectNative() {
   try {
@@ -986,9 +1018,9 @@ function disconnect() {
 // ---- 事件绑定 ----
 $('btnConn').onclick = () => {
   if (APP.session) { disconnect(); return; }
-  if (NATIVE_BLE) { connectNative(); return; }      // APK 里走原生蓝牙
-  if (!navigator.bluetooth) { connectSim(); return; }
-  connectBle();
+  if (NATIVE_BLE) { connectNative(); return; }   // APK：原生蓝牙，弹系统设备列表
+  if (WEB_BLE) { connectBle(); return; }         // 网页：Web Bluetooth，弹系统设备列表
+  explainNoBle();                                // 都不是：明确报错，绝不偷偷进模拟
 };
 $('btnSim').onclick = () => {
   if (APP.session) disconnect();
@@ -1063,9 +1095,21 @@ $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
   } catch (e) { log('旧的配对串无效：' + e.message); }
 })();
 
-if (!navigator.bluetooth && !NATIVE_BLE) {
-  log('提示：当前环境没有蓝牙接口（浏览器需要 https；APK 需要装蓝牙插件）。可以点右上角「模拟」先用模拟设备点通界面。');
-}
+// 环境提示：一打开页面就告诉用户"这条路线能不能真连"
+(function initEnv() {
+  if (NATIVE_BLE) {
+    setBanner('✅ <b>APK 原生蓝牙</b>已就绪：点「连接设备」会弹出系统蓝牙列表，选中 <b>WSP-</b> 开头的设备即可，自动配对，不用输任何码。', 'ok');
+  } else if (WEB_BLE) {
+    setBanner('✅ <b>浏览器蓝牙</b>已就绪（https 页面 + Chrome/Edge）：点「连接设备」会弹出系统设备列表，选中 <b>WSP-</b> 开头的设备即可，自动配对，不用输任何码。', 'ok');
+  } else if (IN_CAPACITOR) {
+    setBanner('⚠ APK 已启动，但蓝牙插件没加载：请装 Actions 里最新构建的 APK。', 'err');
+  } else {
+    setBanner('⚠ 这个浏览器<b>不支持蓝牙直连</b>：请用 <b>Chrome</b> 打开 https://lenen13.github.io/water-heater-switch/ ，或安装 APK。现在只能点「模拟」。', 'err');
+  }
+  if (!WEB_BLE && !NATIVE_BLE) {
+    log('提示：当前环境没有蓝牙接口（浏览器需要 Chrome/Edge + https；APK 需要插件就位）。点右上角「模拟」可先用虚拟设备点通界面。');
+  }
+})();
 </script>
 </body>
 </html>
