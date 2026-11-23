@@ -75,6 +75,8 @@ pio device monitor     # 115200，开机打印设备名/绑定状态
 
 行为要点：上电默认断电；定时器在设备里跑（**手机离开也会到点断电**）；超温强制断电并要求人工按键确认；蓝牙断开**不会**关掉继电器。
 
+编译状态：**已在本机 PlatformIO（espressif32@6.5.0 + NimBLE-Arduino 1.4.3）编译通过**，Flash 40.1%、RAM 7.4%；尚未在真实板子上跑过。两个已经踩过的坑见 `蓝牙热水器开关方案.md` 第 6 节（NimBLE 的 `setScanResponse`、mbedtls 没有 `mbedtls_hkdf`）。
+
 ## 验证（不需要硬件）
 
 ```powershell
