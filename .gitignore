@@ -19,3 +19,7 @@ wateremu-master/
 
 # 注意：docs/index.html 和 apk/www/index.html 是生成物，但必须提交
 # （Pages 直接发布 docs/，APK 构建也用它们），所以不要忽略。
+
+# PlatformIO 编译产物（体积大，不要提交）
+firmware/.pio/
+firmware/build/
