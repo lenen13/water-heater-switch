@@ -12,6 +12,7 @@
 
   const WATER_START_PROLOGUE = [0xFE, 0xFE, 0x09, 0xB0, 0x01, 0x01, 0x00, 0x00];
   const WATER_END_PROLOGUE = [0xFE, 0xFE, 0x09, 0xB3, 0x00, 0x00];
+  const WATER_END_EPILOGUE = [0xFE, 0xFE, 0x09, 0xB4, 0x00, 0x00];
   const WATER_OFFLINE_FIX = [0xFE, 0xFE, 0x09, 0xBC, 0x00, 0x00];
   const WATER_BA_ACK = [0xFE, 0xFE, 0x09, 0xBA, 0x00, 0x00];
   const WATER_PRICE_PER_M3 = 25;      // 元/吨，与原厂默认一致
@@ -132,11 +133,13 @@
     constructor(transport, deviceName) {
       this.t = transport;
       this.name = deviceName;
-      this.state = 'NEW';         // NEW | HANDSHAKE | FLOWING | READY | ERROR
+      this.state = 'NEW';         // NEW | HANDSHAKE | FLOWING | CLOSING | READY | ERROR
       this.keyAuth = false;
       this.volumeDl = 0;
       this.costYuan = 0;
       this.timer = null;
+      this.ending = false;        // 用户点了「断开」：结束流程跑完要自动断蓝牙
+      this.onEnded = null;        // 结束流程完成（或超时）后由外部负责断开连接
       transport.onNotify = c => this.feed(c);
     }
 
@@ -150,7 +153,13 @@
     armTimeout(ms) {
       clearTimeout(this.timer);
       this.timer = setTimeout(() => {
-        if (this.state === 'HANDSHAKE' || this.state === 'WAIT_START' || this.state === 'CLOSING') {
+        if (this.state === 'CLOSING') {
+          // 结束命令没回应：也把蓝牙断掉，别把界面卡在"正在结束"
+          log('⚠ 结束命令没有回应，直接断开');
+          this.finishEnding();
+          return;
+        }
+        if (this.state === 'HANDSHAKE' || this.state === 'WAIT_START') {
           this.fail('设备没有回应（超时）');
         }
       }, ms || 15000);
@@ -207,6 +216,12 @@
           clearTimeout(this.timer);
           uiWater('已结束 ' + (dl / 10).toFixed(1) + ' L / ' + this.costYuan.toFixed(2) + ' 元', 'ok');
           log('本次用水 ' + (dl / 10).toFixed(1) + ' L，约 ' + this.costYuan.toFixed(2) + ' 元');
+          if (this.ending) {
+            log('→ 水控器 ' + hexStr(WATER_END_EPILOGUE));
+            Promise.resolve(this.t.write(Uint8Array.from(WATER_END_EPILOGUE)))
+              .catch(() => {})
+              .then(() => setTimeout(() => this.finishEnding(), 300));
+          }
           break;
         }
         case 0xBA:
@@ -231,10 +246,26 @@
     }
 
     async close() {
-      if (this.state !== 'FLOWING') { toast('当前没有在出水'); return; }
-      this.state = 'CLOSING';
-      await this.send(WATER_END_PROLOGUE);
-      this.armTimeout(10000);
+      // 结束会话：必须先发 B3 让设备关阀，再发 B4，最后才断蓝牙。
+      // 直接 disconnect() 设备是不知道的 —— 阀会一直开着（这就是"断开后还在出水"的 bug）。
+      if (this.state === 'FLOWING') {
+        this.ending = true;
+        this.state = 'CLOSING';
+        uiWater('正在结束…', 'warn');
+        await this.send(WATER_END_PROLOGUE);
+        this.armTimeout(10000);
+        return;
+      }
+      if (this.state === 'CLOSING') return;   // 已经在结束流程里
+      this.finishEnding();
+    }
+
+    finishEnding() {
+      clearTimeout(this.timer);
+      const cb = this.onEnded;
+      this.onEnded = null;
+      this.ending = false;
+      if (cb) { try { cb(); } catch (e) { log('断开失败：' + (e && e.message || e)); } }
     }
   }
 
@@ -388,6 +419,11 @@
     APP.transport = transport;
     waterSession = new WaterSession(transport, name);
     APP.water = waterSession;
+    // 结束流程（B3→B3 回包→B4）走完后，才真正断开蓝牙
+    waterSession.onEnded = () => {
+      waterSession = null;
+      disconnect();
+    };
     setConnected(true, '已连接', 'ok');
     uiWater('握手中…', 'warn');
     await waterSession.start();
@@ -623,7 +659,8 @@
   }
 
   document.getElementById('btnConn').onclick = async () => {
-    if (APP.session || waterSession) { disconnect(); waterSession = null; return; }
+    if (waterSession) { await waterSession.close(); return; }   // 先发 B3/B4 关阀，再断蓝牙
+    if (APP.session) { disconnect(); return; }
     if (NATIVE_BLE) { showPicker(); startScan(); return; }
     if (WEB_BLE) { connectWeb(); return; }
     explainNoBle();
@@ -666,5 +703,8 @@
       + '扫不到就点列表里的「系统列表」按钮兜底。', 'ok');
   }
 
-  window.__WATER__ = { crc16Changgong, crc16Cgaeaf, waterKey, waterUnlockResponse, waterStartEpilogue, repairDeviceFrame };
+  window.__WATER__ = {
+    crc16Changgong, crc16Cgaeaf, waterKey, waterUnlockResponse, waterStartEpilogue, repairDeviceFrame,
+    WaterSession, WATER_END_PROLOGUE, WATER_END_EPILOGUE, WATER_START_PROLOGUE
+  };
 })();
