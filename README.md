@@ -89,7 +89,7 @@ python test_wsp.py        # 51 passed —— 开关版 WSP 可用（含零输入
 cd ..
 node tools/xcheck_web.mjs   # 38 passed —— 网页端与 Python 逐字节一致 + 自动配对/模拟握手端到端
 node tools/bundle_water.mjs # 把 web/water.js（原厂水控器支持）注入 web/index.html
-node tools/xcheck_water.mjs # 17 passed —— 原厂协议 JS 移植与 Python 逐字节一致
+node tools/xcheck_water.mjs # 21 passed —— 原厂协议 JS 移植与 Python 逐字节一致 + 结束流程（B3→B4）
 node tools/sync_site.mjs    # 同步到 docs/ 与 apk/www/
 ```
 
