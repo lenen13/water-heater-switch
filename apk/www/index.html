@@ -964,8 +964,17 @@ async function connectNative() {
     setConnected(false, '握手中…', 'warn');
     await setupSession(transport, 'ble');
   } catch (e) {
-    log('连接失败：' + (e.message || e));
-    toast('连接失败：' + (e.message || e));
+    const msg = String((e && e.message) || e);
+    let hint = msg;
+    if (msg.includes('Missing the following permissions')) {
+      hint = 'APK 的 Android 清单缺权限（旧版 APK 的 bug）：请装最新构建的 APK。原始报错：' + msg;
+    } else if (/cancel/i.test(msg)) {
+      hint = '已取消选择设备';
+    } else if (/permission|denied|拒绝/i.test(msg)) {
+      hint = '权限被拒绝：到系统「设置 → 应用 → 热水器开关 → 权限」里允许「附近的设备 / 位置信息」再试。';
+    }
+    log('连接失败：' + hint);
+    toast('连接失败：' + hint);
     setConnected(false, '未连接', 'err');
   }
 }
