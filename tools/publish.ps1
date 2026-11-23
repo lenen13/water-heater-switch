@@ -29,7 +29,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 $dirs = @('docs', 'web', 'firmware', 'py', 'tools', '.github', 'apk')
 $rootFiles = @('README.md', '蓝牙热水器开关方案.md', '水控器协议解构.md', '自研蓝牙热水器方案.md', '.gitignore')
 
-$skipDirs = @('node_modules', '__pycache__', 'android', '.gradle', '.git')
+$skipDirs = @('node_modules', '__pycache__', 'android', '.gradle', '.git', '.pio', 'build')
 $files = New-Object System.Collections.Generic.List[object]
 
 function Add-File([string]$full, [string]$rel) {
