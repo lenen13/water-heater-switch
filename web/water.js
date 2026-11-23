@@ -241,6 +241,17 @@
   // ---------------------------------------------------------------- 传输
   const norm = u => String(u || '').toLowerCase();
 
+  // ⚠ 关键：Capacitor 蓝牙插件的底层收发是「十六进制字符串」，不是 DataView；
+  //   通知事件名也是拼出来的：notification|<deviceId>|<service>|<characteristic>
+  const toHexSpaced = bytes => Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  function fromHexString(s) {
+    const t = String(s == null ? '' : s).replace(/[^0-9a-fA-F]/g, '');
+    const out = new Uint8Array(t.length >> 1);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(t.substr(i * 2, 2), 16);
+    return out;
+  }
+
   class NativeTransport {
     constructor(deviceId, service, cmd, evt) {
       this.deviceId = deviceId;
@@ -249,23 +260,78 @@
       this.evtUuid = evt;
       this.onNotify = null;
       this.chain = Promise.resolve();
+      this.writeErrors = 0;
     }
+
+    // 拿到原生侧真实的 UUID 字符串（大小写必须和原生完全一致），并订阅通知
+    async listen(service, cmd, evt) {
+      let svc = service, chr = cmd, ev = evt;
+      try {
+        const res = await CapBle.getServices({ deviceId: this.deviceId });
+        const list = (res && res.services) || res || [];
+        log('GATT 服务：' + list.map(s => s.uuid).join(', '));
+        for (const s of list) {
+          if (norm(s.uuid) !== norm(service)) continue;
+          svc = s.uuid;
+          for (const c of (s.characteristics || [])) {
+            if (norm(c.uuid) === norm(cmd)) chr = c.uuid;
+            if (norm(c.uuid) === norm(evt)) ev = c.uuid;
+          }
+        }
+      } catch (e) {
+        log('读取 GATT 服务失败，用默认 UUID：' + (e && e.message ? e.message : e));
+      }
+      this.service = svc; this.cmd = chr; this.evtUuid = ev;
+
+      await CapBle.startNotifications({ deviceId: this.deviceId, service: svc, characteristic: ev });
+
+      const names = [
+        'notification|' + this.deviceId + '|' + svc + '|' + ev,
+        'notification|' + this.deviceId + '|' + String(svc).toUpperCase() + '|' + String(ev).toUpperCase(),
+        'notification|' + this.deviceId + '|' + String(svc).toLowerCase() + '|' + String(ev).toLowerCase()
+      ];
+      const self = this;
+      for (const n of Array.from(new Set(names))) {
+        CapBle.addListener(n, r => {
+          const bytes = fromHexString(r && r.value);
+          if (bytes.length && self.onNotify) self.onNotify(bytes);
+        });
+      }
+      log('已订阅通知：' + names[0]);
+      return this;
+    }
+
     write(bytes) {
       const copy = Uint8Array.from(bytes);
+      const self = this;
       const job = async () => {
         const CHUNK = 180;
         for (let off = 0; off < copy.length; off += CHUNK) {
           const part = copy.subarray(off, Math.min(off + CHUNK, copy.length));
-          await CapBle.write({
-            deviceId: this.deviceId,
-            service: this.service,
-            characteristic: this.cmd,
-            value: new DataView(part.buffer, part.byteOffset, part.byteLength)
-          });
+          const value = toHexSpaced(part);
+          try {
+            await CapBle.write({
+              deviceId: self.deviceId, service: self.service,
+              characteristic: self.cmd, value
+            });
+          } catch (e1) {
+            try {
+              await CapBle.writeWithoutResponse({
+                deviceId: self.deviceId, service: self.service,
+                characteristic: self.cmd, value
+              });
+            } catch (e2) {
+              self.writeErrors++;
+              const m = '写入失败：' + (e2 && e2.message ? e2.message : e2);
+              log('⛔ ' + m);
+              if (self.writeErrors === 1) toast(m);
+              throw e2;
+            }
+          }
           if (off + CHUNK < copy.length) await new Promise(r => setTimeout(r, 12));
         }
       };
-      this.chain = this.chain.catch(() => {}).then(job).catch(e => log('蓝牙写入失败：' + (e && e.message || e)));
+      this.chain = this.chain.catch(() => {}).then(job).catch(() => {});
       return this.chain;
     }
   }
@@ -328,8 +394,8 @@
   }
 
   async function nativeWater(deviceId, name) {
-    await CapBle.startNotifications({ deviceId, service: WATER_SERVICE, characteristic: WATER_RXD });
     const t = new NativeTransport(deviceId, WATER_SERVICE, WATER_TXD, WATER_RXD);
+    await t.listen(WATER_SERVICE, WATER_TXD, WATER_RXD);
     await startWaterSession(t, name);
   }
 
@@ -471,15 +537,21 @@
       await CapBle.connect({ deviceId });
       APP.link = deviceId;
       APP.name = name;
+      CapBle.addListener('disconnected|' + deviceId, () => {
+        if (waterSession) waterSession.state = 'ERROR';
+        setConnected(false, '已断开', 'err');
+        toast('蓝牙已断开');
+      });
       if (isWaterName(name)) {
         await nativeWater(deviceId, name);
       } else {
         APP.proto = 'wsp';
         APP.mode = 'ble';
-        await CapBle.startNotifications({ deviceId, service: UUID_SERVICE, characteristic: UUID_EVT });
         const t = new CapTransport(CapBle, deviceId);
+        const ch = await bleSubscribe(CapBle, deviceId, UUID_SERVICE, UUID_EVT,
+          bytes => { if (t.onNotify) t.onNotify(bytes); });
         t.service = UUID_SERVICE;
-        t.evtUuid = UUID_EVT;
+        t.evtUuid = ch.characteristic;
         APP.transport = t;
         await setupSession(t, 'ble');
         setConnected(true, '已连接', 'ok');
@@ -547,19 +619,6 @@
       if (!seen.has(id)) log('发现设备：' + (name || '(无名)') + '  ' + id);
       seen.set(id, { id, name, rssi: r.rssi });
       renderList();
-    });
-    CapBle.addListener('notification', ev => {
-      const t = APP.transport;
-      if (!t || !t.evtUuid) return;
-      if (norm(ev.service) !== norm(t.service) || norm(ev.characteristic) !== norm(t.evtUuid)) return;
-      if (t.onNotify) t.onNotify(new Uint8Array(ev.value.buffer, ev.value.byteOffset, ev.value.byteLength));
-    });
-    CapBle.addListener('disconnected', ev => {
-      if (APP.link && ev.deviceId === APP.link) {
-        APP.session = null;
-        setConnected(false, '已断开', 'err');
-        toast('连接已断开');
-      }
     });
   }
 
