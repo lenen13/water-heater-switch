@@ -20,7 +20,6 @@
 #include <Preferences.h>
 #include <esp_mac.h>
 #include <esp_system.h>
-#include <mbedtls/hkdf.h>
 #include <mbedtls/md.h>
 
 // --------------------------------------------------------------------------
@@ -95,9 +94,35 @@ static void hmac_sha256(const uint8_t *key, size_t keyLen, const uint8_t *data, 
   mbedtls_md_free(&ctx);
 }
 
+// 注意：Arduino-ESP32 6.x 的 mbedtls 没有编 MBEDTLS_HKDF_C，
+// 直接调 mbedtls_hkdf() 会链接失败（undefined reference）。
+// 这里按 RFC 5869 用 HMAC-SHA256 手写，输出长度正好 32 字节（一个块）。
 static void hkdf_sha256(const uint8_t *ikm, size_t ikmLen, const uint8_t *salt, size_t saltLen,
                         const uint8_t *info, size_t infoLen, uint8_t *out, size_t outLen) {
-  mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), salt, saltLen, ikm, ikmLen, info, infoLen, out, outLen);
+  static const uint8_t zero32[32] = {0};
+  uint8_t prk[32];
+  hmac_sha256(saltLen ? salt : zero32, saltLen ? saltLen : 32, ikm, ikmLen, prk);
+
+  uint8_t t[32];
+  size_t tLen = 0, done = 0;
+  uint8_t counter = 1;
+  while (done < outLen) {
+    mbedtls_md_context_t ctx;
+    mbedtls_md_init(&ctx);
+    mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 1);
+    mbedtls_md_hmac_starts(&ctx, prk, 32);
+    if (tLen) mbedtls_md_hmac_update(&ctx, t, tLen);
+    if (infoLen) mbedtls_md_hmac_update(&ctx, info, infoLen);
+    mbedtls_md_hmac_update(&ctx, &counter, 1);
+    mbedtls_md_hmac_finish(&ctx, t);
+    mbedtls_md_free(&ctx);
+
+    tLen = 32;
+    size_t n = (outLen - done < 32) ? (outLen - done) : 32;
+    memcpy(out + done, t, n);
+    done += n;
+    counter++;
+  }
 }
 
 static const char B32[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -575,7 +600,9 @@ void setup() {
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(UUID_SERVICE);
   adv->setName(devName);
-  adv->enableScanResponse(true);
+  // NimBLE-Arduino 1.4.x 的 API 是 setScanResponse(bool)；
+  // 2.x 才改名 enableScanResponse，用错会编译失败。
+  adv->setScanResponse(true);
   adv->start();
 
   relay_set(false);
