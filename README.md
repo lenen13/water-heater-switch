@@ -21,6 +21,7 @@
 - 大圆钮开关、15/30/45/60 分钟定时、倒计时环、水温、故障提示
 - 设置项存在设备里（最长通电、超温阈值、功率）
 - 首次连接自动配对，密钥按设备 ID 存 localStorage
+- **两种设备都认**：点「连接设备」会列出附近**所有**蓝牙设备，`Water*****`（原厂水控器）直接开关水并按水量算钱，`WSP-****`（自制开关）自动配对后控制热水器电源
 - **模拟设备模式**：没硬件也能完整体验（同协议、同加密，还会模拟超温和到点断电）
 
 打开方式：
@@ -86,7 +87,10 @@ python test_wlp.py        # 51 passed —— 阀门版 WLP 可用
 python test_wsp.py        # 51 passed —— 开关版 WSP 可用（含零输入自动配对）
 
 cd ..
-node tools/xcheck_web.mjs # 38 passed —— 网页端与 Python 逐字节一致 + 自动配对/模拟握手端到端
+node tools/xcheck_web.mjs   # 38 passed —— 网页端与 Python 逐字节一致 + 自动配对/模拟握手端到端
+node tools/bundle_water.mjs # 把 web/water.js（原厂水控器支持）注入 web/index.html
+node tools/xcheck_water.mjs # 17 passed —— 原厂协议 JS 移植与 Python 逐字节一致
+node tools/sync_site.mjs    # 同步到 docs/ 与 apk/www/
 ```
 
 `selftest.py` 用的是原厂仓库 `src/algorithms.spec.ts`、`src/solvers.spec.ts` 里的全部测试向量（`deviceName = "Water33982"` 的 7 组 AE→AF 挑战应答），能全过说明对 `deputy.wat`（WASM 查表）的反推是逐字节正确的。
@@ -105,6 +109,7 @@ firmware/
   src/main.cpp        WSP 开关固件（BLE + 帧解析 + 继电器 + NTC 超温 + NVS）
 web/
   index.html          手机端控制页（含模拟设备 + 原生 BLE 通道，供 APK 复用）
+  water.js            原厂水控器协议（JS 移植）+ 设备选择器，由 bundle_water.mjs 注入 index.html
 docs/
   index.html          GitHub Pages 发布入口（由 tools/sync_site.mjs 生成，勿手改）
   .nojekyll
@@ -118,6 +123,8 @@ apk/
 tools/
   extract_table.py    从 deputy.wat 提取查表
   xcheck_web.mjs      网页 ↔ Python 交叉验证 + 模拟握手
+  bundle_water.mjs    把 water.js 注入 index.html（单文件发布）
+  xcheck_water.mjs    原厂协议 JS ↔ Python 交叉验证
   sync_site.mjs       web/index.html → docs/ 与 apk/www/
   patch_android.mjs   给 Android 工程补蓝牙权限（幂等）
 蓝牙热水器开关方案.md    ★ 制作手册（BOM / 接线 / 烧写 / 测试清单 / FAQ / APK 路线）
