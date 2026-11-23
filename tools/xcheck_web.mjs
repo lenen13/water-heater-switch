@@ -28,8 +28,12 @@ const mod = await import('data:text/javascript;base64,' + Buffer.from(src, 'utf8
 
 // 整段内联脚本的语法检查（只解析不执行）：协议层切片之外的部分（UI）有语法错也能抓到
 try {
-  const body = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
-  new Function(body);
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi; let m; let idx = 0;
+  while ((m = re.exec(html)) !== null) {
+    if (/\bsrc\s*=/.test(m[1])) continue;
+    idx++;
+    try { new Function(m[2]); } catch (e) { console.error('inline script #' + idx + ' syntax error: ' + e.message); process.exit(1); }
+  }
   console.log('✓ 内联脚本语法正确');
 } catch (e) {
   console.error('✗ 内联脚本语法错误：' + e.message);
