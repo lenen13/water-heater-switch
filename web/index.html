@@ -161,7 +161,7 @@
 'use strict';
 // ===================== 协议层（与 py/wsp.py 逐字节一致） =====================
 const UUID_SERVICE = '57535031-0001-4b1e-9d3a-0c0ffee0beef';
-const BUILD = '2026-11-23 13:05';
+const BUILD = '2026-11-23 18:45';
 const UUID_CMD     = '57535031-0002-4b1e-9d3a-0c0ffee0beef';
 const UUID_EVT     = '57535031-0003-4b1e-9d3a-0c0ffee0beef';
 const DEVICE_PREFIX = 'WSP-';
@@ -359,30 +359,76 @@ class FrameReader {
 }
 // 原生 APK（Capacitor）里的蓝牙：走 @capacitor-community/bluetooth-le 插件。
 // 浏览器里 window.Capacitor 不存在，这段完全不参与。
+// ⚠ 插件底层收发的是十六进制字符串（不是 DataView）；通知事件名是
+//   notification|<deviceId>|<service>|<characteristic>，必须用原生给的 UUID 字符串拼。
+function toHexSpaced(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+}
+function fromHexString(s) {
+  const t = String(s == null ? '' : s).replace(/[^0-9a-fA-F]/g, '');
+  const out = new Uint8Array(t.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(t.substr(i * 2, 2), 16);
+  return out;
+}
+async function bleWriteHex(Ble, deviceId, service, characteristic, bytes) {
+  const value = toHexSpaced(bytes);
+  try {
+    await Ble.write({ deviceId, service, characteristic, value });
+  } catch (e) {
+    await Ble.writeWithoutResponse({ deviceId, service, characteristic, value });
+  }
+}
+// 订阅通知：先读出原生真实的 UUID 字符串，再按插件的事件名规则注册监听
+async function bleSubscribe(Ble, deviceId, service, characteristic, onValue) {
+  let svc = service, chr = characteristic;
+  try {
+    const res = await Ble.getServices({ deviceId });
+    const list = (res && res.services) || res || [];
+    for (const s of list) {
+      if (String(s.uuid).toLowerCase() !== String(service).toLowerCase()) continue;
+      svc = s.uuid;
+      for (const c of (s.characteristics || [])) {
+        if (String(c.uuid).toLowerCase() === String(characteristic).toLowerCase()) chr = c.uuid;
+      }
+    }
+  } catch (e) {
+    log('读取 GATT 服务失败，用默认 UUID：' + (e && e.message ? e.message : e));
+  }
+  await Ble.startNotifications({ deviceId, service: svc, characteristic: chr });
+  const names = [
+    'notification|' + deviceId + '|' + svc + '|' + chr,
+    'notification|' + deviceId + '|' + String(svc).toUpperCase() + '|' + String(chr).toUpperCase(),
+    'notification|' + deviceId + '|' + String(svc).toLowerCase() + '|' + String(chr).toLowerCase()
+  ];
+  for (const n of Array.from(new Set(names))) {
+    Ble.addListener(n, r => onValue(fromHexString(r && r.value)));
+  }
+  return { service: svc, characteristic: chr, eventName: names[0] };
+}
 class CapTransport {
   constructor(plugin, deviceId) {
     this.Ble = plugin;
     this.deviceId = deviceId;
+    this.service = UUID_SERVICE;
+    this.characteristic = UUID_CMD;
+    this.evtUuid = UUID_EVT;
     this.onNotify = null;
     this.chain = Promise.resolve();      // 串行化：插件写入是异步的，连发两帧不能交错
   }
   write(bytes) {
     const copy = Uint8Array.from(bytes); // 插件会跨进程序列化，必须拷一份
+    const self = this;
     const job = async () => {
       const CHUNK = 180;                 // 单次写入别超过 MTU 负载（握手后协商到 244 左右）
       for (let off = 0; off < copy.length; off += CHUNK) {
         const part = copy.subarray(off, Math.min(off + CHUNK, copy.length));
-        await this.Ble.write({
-          deviceId: this.deviceId,
-          service: UUID_SERVICE,
-          characteristic: UUID_CMD,
-          value: new DataView(part.buffer, part.byteOffset, part.byteLength)
-        });
+        await bleWriteHex(self.Ble, self.deviceId, self.service, self.characteristic, part);
         if (off + CHUNK < copy.length) await new Promise(r => setTimeout(r, 12));
       }
     };
     this.chain = this.chain.catch(() => {}).then(job).catch(e => {
       log('蓝牙写入失败：' + (e && e.message ? e.message : e));
+      toast('蓝牙写入失败：' + (e && e.message ? e.message : e));
     });
     return this.chain;
   }
@@ -946,14 +992,13 @@ async function connectNative() {
     await CapBle.initialize();
     const device = await CapBle.requestDevice({ namePrefix: DEVICE_PREFIX, optionalServices: [UUID_SERVICE] });
     await CapBle.connect({ deviceId: device.deviceId });
-    await CapBle.startNotifications({ deviceId: device.deviceId, service: UUID_SERVICE, characteristic: UUID_EVT });
     const transport = new CapTransport(CapBle, device.deviceId);
-    CapBle.addListener('notification', ev => {
-      const dv = ev.value;
-      if (transport.onNotify) transport.onNotify(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
-    });
-    CapBle.addListener('disconnected', ev => {
-      if (APP.link === ev.deviceId) {
+    const ch = await bleSubscribe(CapBle, device.deviceId, UUID_SERVICE, UUID_EVT,
+      bytes => { if (transport.onNotify) transport.onNotify(bytes); });
+    transport.evtUuid = ch.characteristic;
+    log('已订阅通知：' + ch.eventName);
+    CapBle.addListener('disconnected|' + device.deviceId, () => {
+      if (APP.link === device.deviceId) {
         setConnected(false, '已断开', 'err');
         APP.session = null;
         toast('连接已断开（继电器状态不受影响）');
@@ -1384,6 +1429,17 @@ $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
   // ---------------------------------------------------------------- 传输
   const norm = u => String(u || '').toLowerCase();
 
+  // ⚠ 关键：Capacitor 蓝牙插件的底层收发是「十六进制字符串」，不是 DataView；
+  //   通知事件名也是拼出来的：notification|<deviceId>|<service>|<characteristic>
+  const toHexSpaced = bytes => Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  function fromHexString(s) {
+    const t = String(s == null ? '' : s).replace(/[^0-9a-fA-F]/g, '');
+    const out = new Uint8Array(t.length >> 1);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(t.substr(i * 2, 2), 16);
+    return out;
+  }
+
   class NativeTransport {
     constructor(deviceId, service, cmd, evt) {
       this.deviceId = deviceId;
@@ -1392,23 +1448,78 @@ $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
       this.evtUuid = evt;
       this.onNotify = null;
       this.chain = Promise.resolve();
+      this.writeErrors = 0;
     }
+
+    // 拿到原生侧真实的 UUID 字符串（大小写必须和原生完全一致），并订阅通知
+    async listen(service, cmd, evt) {
+      let svc = service, chr = cmd, ev = evt;
+      try {
+        const res = await CapBle.getServices({ deviceId: this.deviceId });
+        const list = (res && res.services) || res || [];
+        log('GATT 服务：' + list.map(s => s.uuid).join(', '));
+        for (const s of list) {
+          if (norm(s.uuid) !== norm(service)) continue;
+          svc = s.uuid;
+          for (const c of (s.characteristics || [])) {
+            if (norm(c.uuid) === norm(cmd)) chr = c.uuid;
+            if (norm(c.uuid) === norm(evt)) ev = c.uuid;
+          }
+        }
+      } catch (e) {
+        log('读取 GATT 服务失败，用默认 UUID：' + (e && e.message ? e.message : e));
+      }
+      this.service = svc; this.cmd = chr; this.evtUuid = ev;
+
+      await CapBle.startNotifications({ deviceId: this.deviceId, service: svc, characteristic: ev });
+
+      const names = [
+        'notification|' + this.deviceId + '|' + svc + '|' + ev,
+        'notification|' + this.deviceId + '|' + String(svc).toUpperCase() + '|' + String(ev).toUpperCase(),
+        'notification|' + this.deviceId + '|' + String(svc).toLowerCase() + '|' + String(ev).toLowerCase()
+      ];
+      const self = this;
+      for (const n of Array.from(new Set(names))) {
+        CapBle.addListener(n, r => {
+          const bytes = fromHexString(r && r.value);
+          if (bytes.length && self.onNotify) self.onNotify(bytes);
+        });
+      }
+      log('已订阅通知：' + names[0]);
+      return this;
+    }
+
     write(bytes) {
       const copy = Uint8Array.from(bytes);
+      const self = this;
       const job = async () => {
         const CHUNK = 180;
         for (let off = 0; off < copy.length; off += CHUNK) {
           const part = copy.subarray(off, Math.min(off + CHUNK, copy.length));
-          await CapBle.write({
-            deviceId: this.deviceId,
-            service: this.service,
-            characteristic: this.cmd,
-            value: new DataView(part.buffer, part.byteOffset, part.byteLength)
-          });
+          const value = toHexSpaced(part);
+          try {
+            await CapBle.write({
+              deviceId: self.deviceId, service: self.service,
+              characteristic: self.cmd, value
+            });
+          } catch (e1) {
+            try {
+              await CapBle.writeWithoutResponse({
+                deviceId: self.deviceId, service: self.service,
+                characteristic: self.cmd, value
+              });
+            } catch (e2) {
+              self.writeErrors++;
+              const m = '写入失败：' + (e2 && e2.message ? e2.message : e2);
+              log('⛔ ' + m);
+              if (self.writeErrors === 1) toast(m);
+              throw e2;
+            }
+          }
           if (off + CHUNK < copy.length) await new Promise(r => setTimeout(r, 12));
         }
       };
-      this.chain = this.chain.catch(() => {}).then(job).catch(e => log('蓝牙写入失败：' + (e && e.message || e)));
+      this.chain = this.chain.catch(() => {}).then(job).catch(() => {});
       return this.chain;
     }
   }
@@ -1471,8 +1582,8 @@ $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
   }
 
   async function nativeWater(deviceId, name) {
-    await CapBle.startNotifications({ deviceId, service: WATER_SERVICE, characteristic: WATER_RXD });
     const t = new NativeTransport(deviceId, WATER_SERVICE, WATER_TXD, WATER_RXD);
+    await t.listen(WATER_SERVICE, WATER_TXD, WATER_RXD);
     await startWaterSession(t, name);
   }
 
@@ -1614,15 +1725,21 @@ $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
       await CapBle.connect({ deviceId });
       APP.link = deviceId;
       APP.name = name;
+      CapBle.addListener('disconnected|' + deviceId, () => {
+        if (waterSession) waterSession.state = 'ERROR';
+        setConnected(false, '已断开', 'err');
+        toast('蓝牙已断开');
+      });
       if (isWaterName(name)) {
         await nativeWater(deviceId, name);
       } else {
         APP.proto = 'wsp';
         APP.mode = 'ble';
-        await CapBle.startNotifications({ deviceId, service: UUID_SERVICE, characteristic: UUID_EVT });
         const t = new CapTransport(CapBle, deviceId);
+        const ch = await bleSubscribe(CapBle, deviceId, UUID_SERVICE, UUID_EVT,
+          bytes => { if (t.onNotify) t.onNotify(bytes); });
         t.service = UUID_SERVICE;
-        t.evtUuid = UUID_EVT;
+        t.evtUuid = ch.characteristic;
         APP.transport = t;
         await setupSession(t, 'ble');
         setConnected(true, '已连接', 'ok');
@@ -1690,19 +1807,6 @@ $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
       if (!seen.has(id)) log('发现设备：' + (name || '(无名)') + '  ' + id);
       seen.set(id, { id, name, rssi: r.rssi });
       renderList();
-    });
-    CapBle.addListener('notification', ev => {
-      const t = APP.transport;
-      if (!t || !t.evtUuid) return;
-      if (norm(ev.service) !== norm(t.service) || norm(ev.characteristic) !== norm(t.evtUuid)) return;
-      if (t.onNotify) t.onNotify(new Uint8Array(ev.value.buffer, ev.value.byteOffset, ev.value.byteLength));
-    });
-    CapBle.addListener('disconnected', ev => {
-      if (APP.link && ev.deviceId === APP.link) {
-        APP.session = null;
-        setConnected(false, '已断开', 'err');
-        toast('连接已断开');
-      }
     });
   }
 
