@@ -365,11 +365,13 @@
       + '<div class="sheetHead"><b>选择蓝牙设备</b><span id="pickHint">正在扫描…</span></div>'
       + '<div class="pickList" id="pickList"></div>'
       + '<div class="sheetFoot"><button class="btn" id="pickCancel">取消</button>'
+      + '<button class="btn" id="pickSys">系统列表</button>'
       + '<button class="btn" id="pickAgain">重新扫描</button></div></div>';
     document.body.appendChild(box);
     box.addEventListener('click', e => { if (e.target === box) hidePicker(); });
     box.querySelector('#pickCancel').onclick = () => hidePicker();
     box.querySelector('#pickAgain').onclick = () => startScan();
+    box.querySelector('#pickSys').onclick = () => systemListFallback();
   }
 
   function showPicker() { ensurePicker(); pickerEl().style.display = 'flex'; }
@@ -384,6 +386,8 @@
       return d !== 0 ? d : (b.rssi || -999) - (a.rssi || -999);
     });
     if (!items.length) { list.innerHTML = '<div class="pickEmpty">还没发现设备，稍等两秒…</div>'; return; }
+    const hint = document.getElementById('pickHint');
+    if (hint && scanning) hint.textContent = '扫描中… 已发现 ' + items.length + ' 个';
     list.innerHTML = '';
     for (const it of items) {
       const row = document.createElement('button');
@@ -419,9 +423,10 @@
     } catch (e) {
       scanning = false;
       const msg = String(e && e.message || e);
-      if (hint) hint.textContent = '扫描失败：' + msg;
+      if (hint) hint.textContent = '扫描失败：' + msg + '（可点「系统列表」）';
       log('扫描失败：' + msg);
       if (/permission|denied|拒绝/i.test(msg)) toast('请在系统设置里允许「附近的设备」权限');
+      else toast('自主扫描失败，可点「系统列表」兜底');
     }
   }
 
@@ -430,6 +435,33 @@
     if (!scanning) return;
     scanning = false;
     try { await CapBle.stopLEScan(); } catch (e) {}
+  }
+
+  // 兜底：如果自主扫描一个设备都没扫到，直接用系统的设备选择框（按名字前缀筛）。
+  async function systemListFallback() {
+    const hint = document.getElementById('pickHint');
+    try {
+      await stopScan();
+      const device = await CapBle.requestDevice({
+        namePrefix: 'Water',
+        optionalServices: [WATER_SERVICE]
+      });
+      if (!device || !device.deviceId) return;
+      connectPicked(device.deviceId, device.name || device.localName || 'Water');
+    } catch (e) {
+      const msg = String(e && e.message || e);
+      if (hint) hint.textContent = '系统列表失败：' + msg;
+      if (/cancel/i.test(msg)) return;
+      // 再试一次：不按名字筛，用服务 UUID 筛
+      try {
+        const d2 = await CapBle.requestDevice({ services: [WATER_SERVICE], optionalServices: [WATER_SERVICE] });
+        if (d2 && d2.deviceId) connectPicked(d2.deviceId, d2.name || d2.localName || 'Water');
+      } catch (e2) {
+        const m2 = String(e2 && e2.message || e2);
+        if (hint) hint.textContent = '系统列表失败：' + m2;
+        log('系统列表失败：' + m2);
+      }
+    }
   }
 
   async function connectPicked(deviceId, name) {
@@ -512,6 +544,7 @@
       const id = r.device && r.device.deviceId;
       const name = r.localName || (r.device && (r.device.name || r.device.localName)) || '';
       if (!id) return;
+      if (!seen.has(id)) log('发现设备：' + (name || '(无名)') + '  ' + id);
       seen.set(id, { id, name, rssi: r.rssi });
       renderList();
     });
@@ -567,9 +600,11 @@
   });
 
   if (typeof setBanner === 'function' && (NATIVE_BLE || WEB_BLE)) {
-    setBanner('✅ 蓝牙就绪：点「连接设备」会列出附近<b>所有</b>蓝牙设备（不再只认 WSP-）。<br>'
+    const mode = NATIVE_BLE ? 'APK 原生蓝牙' : '浏览器蓝牙';
+    setBanner('✅ <b>' + mode + '</b>就绪（构建 ' + (typeof BUILD === 'string' ? BUILD : '?') + '）：点「连接设备」会列出附近<b>所有</b>蓝牙设备。<br>'
       + '· <b>Water</b> 开头的原厂水控器 → 直接开关水；'
-      + '· <b>WSP-</b> 开头的自制开关 → 自动配对后控制热水器电源。', 'ok');
+      + '· <b>WSP-</b> 开头的自制开关 → 自动配对后控制热水器电源。<br>'
+      + '扫不到就点列表里的「系统列表」按钮兜底。', 'ok');
   }
 
   window.__WATER__ = { crc16Changgong, crc16Cgaeaf, waterKey, waterUnlockResponse, waterStartEpilogue, repairDeviceFrame };
