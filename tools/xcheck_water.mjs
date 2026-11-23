@@ -97,5 +97,27 @@ ok('注入块在 </body> 之前',
   page.indexOf('<!-- WATER-END -->') < page.lastIndexOf('</body>'));
 
 console.log('');
+// ---------- 结束流程：B3 -> 设备回 B3 -> B4 -> 断开 ----------
+{
+  const sent = [];
+  const t = { onNotify: null, write: async b => { sent.push(hex(b)); } };
+  const s = new W.WaterSession(t, 'Water41177');
+  let ended = false;
+  s.onEnded = () => { ended = true; };
+  s.state = 'FLOWING';
+  await s.close();
+  ok('结束流程先发 B3', sent[0] === 'fefe09b30000', sent[0]);
+  const reply = Uint8Array.from([
+    0xfd, 0xfd, 0x09, 0xb3,
+    0x38, 0xbb, 0x02, 0x00, 0x70, 0xe2, 0xeb, 0x20,
+    0x01, 0x01, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00
+  ]);
+  s.feed(reply);
+  ok('B3 回包算出用量 2.8 L', s.volumeDl === 28, String(s.volumeDl));
+  ok('B3 回包后发 B4', sent[1] === 'fefe09b40000', sent[1]);
+  await new Promise(r => setTimeout(r, 400));
+  ok('结束完成后触发断开回调', ended === true);
+}
+
 console.log(pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
